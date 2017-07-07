@@ -212,7 +212,7 @@ def pdb_charge_str(line: str) -> str:
     else:
         return charge_chars
 
-def open_babel_formula(pdb_str: str) -> List[Tuple[str, int]]:
+def pdb_formula(pdb_str: str) -> List[Tuple[str, int]]:
     return [
         (element, len(list(occurences)))
         for (element, occurences) in
@@ -223,7 +223,7 @@ def open_babel_formula(pdb_str: str) -> List[Tuple[str, int]]:
 
 on_sign = itemgetter(1)
 
-def open_babel_total_charge(pdb_str: str) -> int:
+def pdb_total_charge(pdb_str: str) -> int:
     return sum([
         int(sign + '1') * sum([int(x[0]) for x in occurences])
         for (sign, occurences) in
@@ -236,16 +236,16 @@ def open_babel_total_charge(pdb_str: str) -> int:
         )
     ])
 
-def open_babel_formula_string(pdb_str: str, add_charge: bool = False) -> str:
+def pdb_formula_string(pdb_str: str, add_charge: bool = False) -> str:
     if add_charge:
-        total_charge = open_babel_total_charge(pdb_str)
+        total_charge = pdb_total_charge(pdb_str)
         if total_charge == 0:
             add_charge = False
 
     return ''.join(
         [
             '{element}{occurence}'.format(element=element.title(), occurence=(occurence if occurence != 1 else ''))
-            for (element, occurence) in open_babel_formula(pdb_str)
+            for (element, occurence) in pdb_formula(pdb_str)
         ]
         +  [ '{sign}{total_charge}'.format(total_charge=abs(total_charge), sign=('+' if total_charge > 0 else '-')) if add_charge else '']
     )
@@ -276,8 +276,8 @@ HETATM   36  H15 UNK     0      -3.379  -2.942  -1.191  1.00  0.00          CL3+
 HETATM   36  H15 UNK     0      -3.379  -2.942  -1.191  1.00  0.00          CL5+
 HETATM   18  C17 RTL A 201      14.349  -6.384 -14.255  1.00  0.00           C  
 '''
-    print(open_babel_formula_string(pdb_str))
-    print(open_babel_total_charge(pdb_str))
+    print(pdb_formula_string(pdb_str))
+    print(pdb_total_charge(pdb_str))
 
     for line in pdb_str.splitlines():
         if is_pdb_atom_line(line):
