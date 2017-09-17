@@ -26,6 +26,7 @@ def babel_output(
     dont_add_H: bool = False,
     debug: bool = False,
     babel_executable: str = '/usr/local/bin/babel',
+    babel_libdir: str = None,
     timeout: int = 60,
     title: Optional[str] = None,
     extra_args: str = '',
@@ -41,11 +42,13 @@ def babel_output(
     if debug:
         print(' '.join(args))
 
+    custom_env = environ.copy()
+
     if dont_add_H:
-        custom_env = environ.copy()
         custom_env["DONT_FIX_H_INCHI"] = "1"
-    else:
-        custom_env = None
+
+    if babel_libdir is not None:
+        custom_env['BABEL_LIBDIR'] = babel_libdir
 
     tmp_file = TemporaryFile(buffering=0)
     try:
