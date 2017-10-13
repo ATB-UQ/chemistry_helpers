@@ -36,7 +36,7 @@ def babel_output(
         raise BabelTimeoutError("Running Babel timed out after: {0}s.".format(timeout))
 
     assert exists(babel_executable), 'Error: Babel executable "{0}" do not exist'.format(babel_executable)
-    assert isinstance(in_data, str), 'Error: Invalid in_data type: {0} (expected str)'.format(type(in_data))
+    assert type(in_data) in (str, bytes), 'Error: Invalid in_data type: {0} (expected str or bytes)'.format(type(in_data))
 
     args = [babel_executable, "-i" + in_format, "-o" + out_format] + (['--title', title] if title else []) + (['-p', str(pH)] if pH else []) + extra_args.split()
 
