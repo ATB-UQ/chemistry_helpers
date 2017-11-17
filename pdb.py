@@ -9,6 +9,7 @@ CHARGE = ('<', '')
 F = ('', '.3f')
 I = ('>', '')
 
+# Columns definition are inclusive on both ends
 PDB_ATOM_INDEX_FIELD = (7, 11)
 PDB_ATOM_NAME_FIELD = (13, 16)
 PDB_COORD_FIELDS = ((31,38), (39, 46), (47, 54)) # Taken from ftp://ftp.wwpdb.org/pub/pdb/doc/format_descriptions/Format_v33_Letter.pdf, page 194
