@@ -79,11 +79,16 @@ def babel_output(
         raise BabelFailure(stderr.decode())
 
     try:
-        return stdout.strip().decode()
+        babel_stdout = stdout.strip().decode()
     except UnicodeDecodeError:
         dump_babel_failure(in_data, ' '.join(args))
         dump_babel_failure(stdout, ' '.join(args))
         raise
+    if len(babel_stdout) > 0:
+        return babel_stdout
+    else:
+        dump_babel_failure(in_data, ' '.join(args))
+        raise BabelFailure(stderr.decode())
 
 def dump_babel_failure(in_data: Union[str, bytes], babel_command: str) -> bool:
     module_dir = dirname(abspath(__file__))
