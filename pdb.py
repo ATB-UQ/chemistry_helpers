@@ -44,7 +44,7 @@ HETATM_SPECS = (
     PDB_ATOM_INDEX_FIELD + S,  # Atom serial number
     PDB_ATOM_NAME_FIELD + S, # Atom name
 #    (17, 17) + S, # Alternate location indicator
-    (18, 20) + S, # Residue name
+    (18, 21) + S, # Residue name
     (22, 22) + S, # Chain identifier
     (23, 26) + S, # Residue sequence number
 #    (27, 27) + S, # Code for insertion of residues
