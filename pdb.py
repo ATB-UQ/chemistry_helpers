@@ -11,7 +11,7 @@ I = ('>', '')
 
 # Columns definition are inclusive on both ends
 PDB_ATOM_INDEX_FIELD = (7, 11)
-PDB_ATOM_NAME_FIELD = (13, 16)
+PDB_ATOM_NAME_FIELD = (12, 16)
 PDB_COORD_FIELDS = ((31,38), (39, 46), (47, 54)) # Taken from ftp://ftp.wwpdb.org/pub/pdb/doc/format_descriptions/Format_v33_Letter.pdf, page 194
 PDB_ELEMENT_FIELD = (77, 78)
 PDB_CHARGE = (79, 80)
@@ -137,7 +137,7 @@ def str_for_pdb_atom(atom: PDB_Atom, residue_name: str = 'RES', chain_id: str = 
     return PDB_TEMPLATE.format(
         PDB_ATOM_RECORDS[0],
         atom.index,
-        atom.name,
+        atom.name[:5],
         residue_name,
         chain_id,
         residue_number,
