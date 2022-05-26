@@ -158,6 +158,25 @@ def get_coords_from_pdbstr(pdb_str: str, filter_empty=False) -> List[Coordinate]
         ]
     )
 
+def pdb_str_from(atom_names: List[str], element_types: List[str], coords: List[Tuple]) -> str:
+    return "\n".join(
+        [PDB_TEMPLATE.format(
+            PDB_ATOM_RECORDS[0],
+            i + 1,
+            atom_name,
+            "RES",
+            "",
+            1,
+            *coord,
+            "",
+            "",
+            element_type,
+            "",
+            )
+        for i, (atom_name, element_type, coord) in enumerate(zip(atom_names, element_types, coords))
+        ]
+    )
+
 def get_coords_from_pdbline(line: str) -> Optional[Coordinate]:
     if is_pdb_atom_line(line):
         return tuple(
