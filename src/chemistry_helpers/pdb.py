@@ -208,7 +208,7 @@ def pdb_fields(line: str) -> List[str]:
         for (field_start, field_stop, _, _) in HETATM_SPECS
     ]
 
-def pdb_conect_line(fields: List[Union[str, int]]) -> List[str]:
+def pdb_conect_line(fields: List[Union[str, int]]) -> str:
     return CONECT_TEMPLATE.format(
         *list(PDB_CONNECT_RECORDS) + fields + [''] * (len(CONECT_SPECS) - len(fields) - 1)
     )
