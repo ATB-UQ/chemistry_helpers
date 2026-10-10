@@ -3,7 +3,7 @@ import signal
 import sys
 from ctypes import CDLL, c_int, c_ulong
 from ctypes.util import find_library
-from tempfile import TemporaryFile
+from tempfile import TemporaryFile, gettempdir
 from os import environ, makedirs
 from subprocess import Popen, PIPE, TimeoutExpired
 from os.path import join, abspath, dirname, exists
@@ -134,6 +134,12 @@ def babel_output(
         _terminate_process_tree(proc)
         dump_babel_failure(in_data, ' '.join(args))
         raise BabelTimeoutError('Running Babel timed out after {0}s (args="{1}")'.format(timeout, ' '.join(args)))
+    except BaseException:
+        # Celery's SoftTimeLimitExceeded, KeyboardInterrupt, a cancelled thread:
+        # kill the whole group on every exit path (PDEATHSIG only fires when the
+        # forking thread exits).
+        _terminate_process_tree(proc)
+        raise
 
     if b'ERROR: not a valid' in stderr:
         dump_babel_failure(in_data, ' '.join(args))
@@ -152,9 +158,59 @@ def babel_output(
         raise BabelFailure(stderr.decode())
 
 
-# Defaults to a directory inside the installed package, which is a poor place to
-# write runtime state; override it per deployment.
-BABEL_FAILURE_LOG_DIR = environ.get('BABEL_FAILURE_LOG_DIR', join(dirname(abspath(__file__)), 'logs'))
+# Failure dumps hold the full (possibly private) input, so they live under the
+# runtime-state root, not inside the installed package, and are capped.
+# Override with ATB_CHEMISTRY_HELPERS_BABEL_FAILURE_DIR (legacy alias:
+# BABEL_FAILURE_LOG_DIR). Tests may set this module attribute directly.
+BABEL_FAILURE_LOG_DIR: Optional[str] = None
+BABEL_FAILURE_MAX_FILES = 400   # dump = .log + .sh pair, so ~200 failures
+BABEL_FAILURE_MAX_BYTES = 50 * 1024 * 1024
+
+
+def babel_failure_dir() -> str:
+    """Resolve the dump directory: module attribute, env override, then
+    ``atb_server_settings.project_workdir('chemistry_helpers')/babel_failures``.
+
+    atb_server_settings is imported lazily and only as a soft dependency: this
+    package is deliberately dependency-free (it is imported by ~12 siblings and
+    atb_server_settings pulls in pydantic-settings), so it is not declared. If it
+    is absent the ATB_WORKDIR env var (the same variable that setting reads) is
+    used, and finally the system temp dir."""
+    if BABEL_FAILURE_LOG_DIR:
+        return BABEL_FAILURE_LOG_DIR
+    override = environ.get('ATB_CHEMISTRY_HELPERS_BABEL_FAILURE_DIR') or environ.get('BABEL_FAILURE_LOG_DIR')
+    if override:
+        return override
+    try:
+        from atb_server_settings import project_workdir
+        return join(str(project_workdir('chemistry_helpers')), 'babel_failures')
+    except Exception:
+        root = environ.get('ATB_WORKDIR') or join(gettempdir(), 'atb_workdir')
+        return join(root, 'chemistry_helpers', 'babel_failures')
+
+
+def _prune_failure_dir(directory: str) -> None:
+    """Delete the oldest files until the directory is within the count and size caps."""
+    entries = []
+    for name in os.listdir(directory):
+        path = join(directory, name)
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        entries.append((st.st_mtime, path, st.st_size))
+    entries.sort()
+    total = sum(e[2] for e in entries)
+    count = len(entries)
+    for _, path, size in entries:
+        if count <= BABEL_FAILURE_MAX_FILES and total <= BABEL_FAILURE_MAX_BYTES:
+            break
+        try:
+            os.remove(path)
+        except OSError:
+            continue
+        count -= 1
+        total -= size
 
 
 def dump_babel_failure(in_data: Union[str, bytes], babel_command: str) -> bool:
@@ -165,17 +221,19 @@ def dump_babel_failure(in_data: Union[str, bytes], babel_command: str) -> bool:
     exist on the deployed host, and the resulting FileNotFoundError propagated
     in place of the BabelTimeoutError/BabelFailure that callers catch -- turning
     a handled "conversion timed out" into an unhandled 500.'''
-    log_path = join(
-        BABEL_FAILURE_LOG_DIR,
-        md5(babel_command.encode() + encode_if_necessary(in_data)).hexdigest()[:5] + '.log',
-    )
-
+    log_path = '(unresolved)'
     try:
-        makedirs(BABEL_FAILURE_LOG_DIR, exist_ok=True)
+        directory = babel_failure_dir()
+        log_path = join(
+            directory,
+            md5(babel_command.encode() + encode_if_necessary(in_data)).hexdigest() + '.log',
+        )
+        makedirs(directory, exist_ok=True)
         with open(log_path, 'w' + ('t' if isinstance(in_data, str) else 'b')) as fh:
             fh.write(in_data)
-        with open(log_path.replace('.log', '.sh'), 'wt') as fh:
+        with open(log_path[:-len('.log')] + '.sh', 'wt') as fh:
             fh.write(babel_command + '\n')
+        _prune_failure_dir(directory)
         return True
     except Exception as e:
         print('WARNING: could not record Babel failure to {0}: {1}'.format(log_path, e), file=sys.stderr)

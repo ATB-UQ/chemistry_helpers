@@ -14,7 +14,7 @@ imported by `atb_helpers` (which wraps it with platform config) and by `atb_outp
 * `babel.py`: `babel_output(data, in_format=..., out_format=..., timeout=...)` runs `babel` in a
   killable child (communicate timeout; orphaned children killed with `PR_SET_PDEATHSIG`); raises
   `BabelTimeoutError` / `BabelFailure` / `Babel_Screw_Up`; `dump_babel_failure` writes failing
-  inputs under `logs/`. Defaults to `/usr/local/bin/babel`; `atb_helpers.babel` passes the
+  inputs under `$WORKDIR/chemistry_helpers/babel_failures` (override `ATB_CHEMISTRY_HELPERS_BABEL_FAILURE_DIR`; capped at 400 files / 50 MB, oldest deleted; full md5 names). Any exception (incl. BaseException) kills the babel process group. Defaults to `/usr/local/bin/babel`; `atb_helpers.babel` passes the
   configured path and timeout instead.
 * `io.py`: `decode_if_necessary`, `encode_if_necessary`, `can_encode_and_decode`.
 

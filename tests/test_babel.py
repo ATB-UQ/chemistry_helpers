@@ -120,11 +120,46 @@ def test_dump_failure_never_raises(tmp_path, monkeypatch, capsys):
     assert 'WARNING: could not record Babel failure' in capsys.readouterr().err
 
 
-def test_dump_name_is_five_hex_chars_of_md5(tmp_path, failure_log_dir):
+def test_dump_name_is_full_md5(tmp_path, failure_log_dir):
     assert babel.dump_babel_failure('data', 'cmd') is True
+    stems = {os.path.splitext(n)[0] for n in os.listdir(failure_log_dir)}
+    assert len(stems) == 1 and len(stems.pop()) == 32
+
+
+def test_default_dir_is_under_workdir_not_package(monkeypatch, tmp_path):
+    monkeypatch.setattr(babel, 'BABEL_FAILURE_LOG_DIR', None)
+    monkeypatch.delenv('ATB_CHEMISTRY_HELPERS_BABEL_FAILURE_DIR', raising=False)
+    monkeypatch.delenv('BABEL_FAILURE_LOG_DIR', raising=False)
+    d = babel.babel_failure_dir()
+    assert d.endswith(os.path.join('chemistry_helpers', 'babel_failures'))
+    assert not d.startswith(os.path.dirname(os.path.abspath(babel.__file__)))
+
+
+def test_env_override(monkeypatch, tmp_path):
+    monkeypatch.setattr(babel, 'BABEL_FAILURE_LOG_DIR', None)
+    monkeypatch.setenv('ATB_CHEMISTRY_HELPERS_BABEL_FAILURE_DIR', str(tmp_path / 'x'))
+    assert babel.babel_failure_dir() == str(tmp_path / 'x')
+    assert babel.dump_babel_failure('d', 'c') is True
+    assert len(os.listdir(tmp_path / 'x')) == 2
+
+
+def test_dump_dir_is_capped_oldest_first(monkeypatch, failure_log_dir):
+    monkeypatch.setattr(babel, 'BABEL_FAILURE_MAX_FILES', 6)
+    for i in range(10):
+        assert babel.dump_babel_failure('data%d' % i, 'cmd') is True
+        time.sleep(0.01)
     names = os.listdir(failure_log_dir)
-    stems = {os.path.splitext(n)[0] for n in names}
-    assert len(stems) == 1 and len(stems.pop()) == 5  # REVIEW (P3): 20-bit key, collisions overwrite
+    assert len(names) <= 6
+    newest = babel.md5(b'cmd' + b'data9').hexdigest()
+    assert newest + '.log' in names
+
+
+def test_dump_dir_size_cap(monkeypatch, failure_log_dir):
+    monkeypatch.setattr(babel, 'BABEL_FAILURE_MAX_BYTES', 1000)
+    for i in range(5):
+        babel.dump_babel_failure('x' * 600 + str(i), 'cmd')
+        time.sleep(0.01)
+    assert sum(os.path.getsize(os.path.join(failure_log_dir, n)) for n in os.listdir(failure_log_dir)) <= 1000
 
 
 def test_timeout_raises_and_kills_whole_process_group(tmp_path, failure_log_dir):
@@ -155,36 +190,27 @@ def test_isolate_child_puts_child_in_its_own_group(tmp_path):
     assert int(out) != os.getpgid(0)
 
 
-def test_keyboard_interrupt_during_wait_does_not_kill_the_child(tmp_path, monkeypatch):
-    """REVIEW (P2): only TimeoutExpired is handled. Any other exception out of communicate()
-    (KeyboardInterrupt, Celery's SoftTimeLimitExceeded, a worker thread being cancelled) leaves
-    babel running until PR_SET_PDEATHSIG fires, which needs the parent *thread* to exit. The
-    repo CLAUDE.md rule is 'kill by process group on every exit path, BaseException included'.
-    This pins the current behaviour: the child outlives the exception."""
+def test_keyboard_interrupt_during_wait_kills_the_process_group(tmp_path, monkeypatch):
+    """C-2 fixed: any BaseException out of communicate() kills babel and its group."""
     pidfile = tmp_path / 'child.pid'
-    exe = make_script(tmp_path, 'echo $$ > {0}\nsleep 300'.format(pidfile))
+    exe = make_script(tmp_path, 'sleep 300 &\necho $$ > {0}\nwait'.format(pidfile))
     started = []
     real_popen = babel.Popen
 
     class Boom(real_popen):
         def communicate(self, *a, **kw):
-            started.append(self)
-            read_pid(pidfile)
-            raise KeyboardInterrupt
+            if not started:
+                started.append(self)
+                read_pid(pidfile)
+                raise KeyboardInterrupt
+            return super().communicate(*a, **kw)
 
     monkeypatch.setattr(babel, 'Popen', Boom)
-    try:
-        with pytest.raises(KeyboardInterrupt):
-            babel_output('x', in_format='a', out_format='b', babel_executable=exe, timeout=30)
-        pid = started[0].pid
-        assert alive(pid), 'child was killed on KeyboardInterrupt: update this test and the REVIEW note'
-    finally:
-        for p in started:
-            try:
-                os.killpg(p.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            real_popen.wait(p)
+    with pytest.raises(KeyboardInterrupt):
+        babel_output('x', in_format='a', out_format='b', babel_executable=exe, timeout=30)
+    pid = started[0].pid
+    assert wait_dead([pid, read_pid(pidfile)]) == [], 'child survived KeyboardInterrupt'
+    assert started[0].poll() is not None
 
 
 @pytest.mark.skipif(not os.path.exists('/usr/local/bin/babel'), reason='needs the real babel')
