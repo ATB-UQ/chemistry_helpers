@@ -1,0 +1,18 @@
+ #############################################################################
+ #                                                                           #
+ #                            NOTICE TO USERS                                #
+ #                                                                           #
+ #  This computer system is operated by the Pawsey Supercomputing Centre     #
+ #  for authorised clients only. By using Pawsey facilities you agree to     #
+ #  the Conditions of Use available at                                       #
+ #  https://pawsey.atlassian.net/wiki/display/US/Conditions+of+Use           #
+ #                                                                           #
+ #  Your actions and activity on this system may be monitored and recorded.  #
+ #  Unauthorised or improper use of this system may result in administrative #
+ #  disciplinary action and/or civil or criminal penalties.                  #
+ #                                                                           #
+ #  By continuing to use this system you indicate your awareness of and      #
+ #  consent to these terms and conditions of use.  LOG OFF IMMEDIATELY if    #
+ #  you do not agree to the conditions stated in this warning.               #
+ #                                                                           #
+ #############################################################################
