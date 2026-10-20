@@ -133,6 +133,107 @@ def pdb_atoms_in(pdb_str: str) -> List[PDB_Atom]:
         if is_pdb_atom_line(line)
     ]
 
+class PdbElementError(ValueError):
+    """An ATOM/HETATM record has no element (cols 77-78) and the name does not settle it."""
+
+
+_ELEMENT_SYMBOLS = frozenset(
+    """H HE LI BE B C N O F NE NA MG AL SI P S CL AR K CA SC TI V CR MN FE CO NI CU ZN GA GE AS SE BR KR
+    RB SR Y ZR NB MO TC RU RH PD AG CD IN SN SB TE I XE CS BA LA CE PR ND PM SM EU GD TB DY HO ER TM YB LU
+    HF TA W RE OS IR PT AU HG TL PB BI PO AT RN FR RA AC TH PA U NP PU AM CM BK CF ES FM MD NO LR RF DB SG
+    BH HS MT DS RG CN NH FL MC LV TS OG""".split())
+
+# Residues whose atom names follow the PDB polymer convention (NE, CA, CD, HG, OG, SD ... are an
+# element letter plus a remoteness letter, never Ne/Ca/Cd/Hg/Og/Sd). Anywhere else a name whose
+# first two letters form an element symbol is ambiguous and is refused.
+_POLYMER_RESIDUES = frozenset(
+    """ALA ARG ASN ASP CYS GLN GLU GLY HIS ILE LEU LYS MET PHE PRO SER THR TRP TYR VAL
+    HID HIE HIP HSD HSE HSP HISA HISB HISH HISD HISE HISP CYX CYM CYS2 ASH GLH LYN ACE NME NMA NH2 NHE
+    A C G U T DA DC DG DT RA RC RG RU ADE CYT GUA URA THY
+    HOH WAT SOL TIP3 TIP SPC""".split())
+
+_ONE_LETTER_ELEMENTS = 'HCNOSPFIB'
+
+# Selenomethionine's SE really is selenium, even though MSE is a polymer-like residue.
+_NAME_EXCEPTIONS = {('MSE', 'SE'): 'Se'}
+
+
+def infer_element(name: str, resname: str = '') -> Optional[str]:
+    """Element for an atom that has no element column, from its name (owner decision D5).
+
+    Returns the symbol, or ``None`` when the name does not settle it. The name, stripped and
+    with digits and punctuation removed, must start with one of H C N O S P F I B. If its first
+    two letters also form an element symbol (CL, BR, NA, MG, ZN, SE, CA, CD, HG, FE ...) the name
+    is only accepted when ``resname`` is a standard amino acid, nucleotide or water, where the
+    PDB name convention makes CA/CB/CD/CE/CG/CZ/HG/HE/NE/OG/SD ... alpha/beta/... atoms; a ligand
+    or ion with such a name (``CL1``, ``CA``, ``HG``) is ambiguous and returns None. Any other
+    first letter (K, Y, W, U ...) or no letters also returns None. The residue name decides, not
+    ATOM vs HETATM: many writers use HETATM for every atom.
+    """
+    resname = resname.strip().upper()
+    letters = ''.join(ch for ch in name.upper() if ch.isalpha())
+    if (resname, letters) in _NAME_EXCEPTIONS:
+        return _NAME_EXCEPTIONS[(resname, letters)]
+    if not letters or letters[0] not in _ONE_LETTER_ELEMENTS:
+        return None
+    if len(letters) >= 2 and letters[:2] in _ELEMENT_SYMBOLS and resname not in _POLYMER_RESIDUES:
+        return None
+    return letters[0]
+
+
+def read_pdb_arrays(text: str, require_elements: bool = True) -> Tuple[List[str], List[str], List[Coordinate], dict]:
+    """``(names, elements, coords, extras)`` from the ATOM/HETATM records of ``text``.
+
+    Names are columns 13-16 stripped; elements are columns 77-78 normalised to ``Cl`` form, or,
+    when blank, inferred from the name by :func:`infer_element`, else :class:`PdbElementError`
+    (message names the 1-based line number). Coordinates are Angstrom tuples (columns 31-54).
+    ``extras`` holds per-atom lists ``resnames`` (18-21, the 4-column form ATB writes), ``resseqs`` (23-26, int, or the raw stripped string if not an integer),
+    ``serials`` (7-11), ``charges`` (79-80 as in ``pdb_atoms_in``, None if blank),
+    ``inferred`` (True where the element was inferred), and ``conect``: sorted unique
+    ``(serial, serial)`` pairs, smaller first, from the CONECT records; also ``icodes`` (col 27).
+    With ``require_elements=False`` an atom whose element cannot be inferred gets ``''`` instead of
+    raising (for callers that only need names and coordinates).
+    """
+    names, elements, coords = [], [], []
+    extras = {'resnames': [], 'resseqs': [], 'serials': [], 'charges': [], 'inferred': [], 'icodes': [], 'conect': []}
+    bonds = set()
+    for number, line in enumerate(text.splitlines(), start=1):
+        if is_pdb_connect_line(line):
+            ids = [int(line[a:a + 5]) for a in range(6, 31, 5) if line[a:a + 5].strip()]
+            for other in ids[1:]:
+                bonds.add((min(ids[0], other), max(ids[0], other)))
+            continue
+        if not is_pdb_atom_line(line):
+            continue
+        name = line[12:16].strip()
+        resname = line[17:21].strip()
+        element = line[76:78].strip()
+        inferred = False
+        if element:
+            element = element[0].upper() + element[1:].lower()
+        else:
+            symbol = infer_element(name, resname)
+            if symbol is None and not require_elements:
+                symbol = ''
+            if symbol is None:
+                raise PdbElementError(
+                    'line {0}: atom {1!r} (residue {2!r}) has no element column and the name '
+                    'does not settle it'.format(number, name, resname))
+            element, inferred = symbol, True
+        resseq = line[22:26].strip()
+        names.append(name)
+        elements.append(element)
+        coords.append(get_coords_from_pdbline(line))
+        extras['resnames'].append(resname)
+        extras['resseqs'].append(int(resseq) if resseq.lstrip('-').isdigit() else resseq)
+        extras['serials'].append(get_attribute_from_pdb_line('atom_index', line))
+        extras['charges'].append(get_attribute_from_pdb_line('charge', line.ljust(80)))
+        extras['inferred'].append(inferred)
+        extras['icodes'].append(line[26:27].strip())
+    extras['conect'] = sorted(bonds)
+    return names, elements, coords, extras
+
+
 def str_for_pdb_atom(atom: PDB_Atom, residue_name: str = 'RES', chain_id: str = '', residue_number: int = 1) -> str:
     return PDB_TEMPLATE.format(
         PDB_ATOM_RECORDS[0],
